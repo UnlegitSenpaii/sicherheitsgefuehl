@@ -1,5 +1,8 @@
 # Security Policy
 
+## Reporting a Vulnerability
+Please report security vulnerabilities as a bug in the Issues page.
+
 ## Supported Versions
 
 Use this section to tell people about which versions of your project are
