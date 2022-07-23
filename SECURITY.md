@@ -13,6 +13,6 @@ currently being supported with security updates.
 | 1.0.x   | :white_check_mark: |
 | > 0.9.x | :x:                |
 
-## Vulnerabilities
+## Past Vulnerabilities
 
 
