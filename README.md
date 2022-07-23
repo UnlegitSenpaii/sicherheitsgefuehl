@@ -13,5 +13,9 @@
 
 #### server status 
 ![Uptime Robot status](https://img.shields.io/uptimerobot/status/m792315556-485d2c0e9bae5cb7acb51b68)
+
+uptime last 7 days
 ![Uptime Robot ratio (7 days)](https://img.shields.io/uptimerobot/ratio/7/m792315556-485d2c0e9bae5cb7acb51b68)
+
+uptime last 30 days
 ![Uptime Robot ratio (30 days)](https://img.shields.io/uptimerobot/ratio/m792315556-485d2c0e9bae5cb7acb51b68)
