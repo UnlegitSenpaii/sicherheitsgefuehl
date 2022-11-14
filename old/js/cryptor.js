@@ -95,7 +95,7 @@ function CipherToString(buf) {
 //converts stuff like <script> to &#60;script&#62;
 function sanitize(str) {
     return String(str).replace(/[^\w. ]/gi, function (c) {
-        return '&#' + c.charCodeAt(0) + (isNaN(c.charCodeAt(1)) ? "" : c.charCodeAt(1)) + ';';
+        return '&#' + c.charCodeAt(0) + ';';
     });
 }
 
