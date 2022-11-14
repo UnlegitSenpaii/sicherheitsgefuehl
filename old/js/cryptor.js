@@ -8,16 +8,23 @@
     - loading screen is glitched
     - sending message on enter doesn't work sometimes?
     - its possible to send "empty" messages with just enter as input
+    - "channel info" button is not very good
     - ui channel settings are in an incorrect location
     - ui ui ui
 
     (implementation queue)
     - opensource already!!!
+    - !IMPORTANT! improve loading times by loading messages one by one
+        -> would make channel switching infinitely faster
+        -> no need to refresh entire page to check for messages
+        -> cache
     - Emojis are lost somewhere
     - Right Click Message Menu
         -> React to messages
         -> Reply to messages
         -> Copy message / content?
+    - remove inline js & forbid inline js using csp
+    - sandbox domain / sandbox iframe
     - Remove from content upload queue
     - Focus on image content
     - Message formatting (code, bold, italic, ...)
@@ -34,6 +41,7 @@
     - dynamic website title
     - make logs more appearing to the user (example: "msg too long!" in top right? )
     - drag and drop images?
+    - https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/require-trusted-types-for
 
     (still thinking about it)
     - support for different file types or file hosters
@@ -126,7 +134,6 @@ function convertUTCDateToLocalDate(date) {
 function GetYoutubeVideoID(url) {
     const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
     const match = url.match(regExp);
-
     return (match && match[2].length === 11) ? match[2] : null;
 }
 
@@ -303,7 +310,7 @@ async function DeleteFromEmbeddingData(embedding) {
 }
 
 async function LoadDefaultEmbeddingData() {
-    const defaultValues = ["https://i.imgur.com", "https://cdn.discordapp.com/attachments", "https://youtu.be", "https://www.youtube.com/"];
+    const defaultValues = ["https://i.imgur.com/", "https://cdn.discordapp.com/attachments/", "https://youtu.be/", "https://www.youtube.com/"];
     for (const val of defaultValues) {
         embeddingStuff[(await GetSHA224(val)).toString()] = val;
     }
@@ -332,16 +339,48 @@ async function FetchEmbeddedData() {
     return true;
 }
 
+function getLocationInformation(href) {
+    //whatever phpstrom says about this regex is wrong, ignore, or it'll implode
+    const match = href.match(/^(?:(https?\:)\/\/)?(([^:\/?#]*)(?:\:([0-9]+))?)([\/]{0,1}[^?#]*)(\?[^#]*|)(#.*|)$/);
+    return match && {
+        href: href,
+        protocol: match[1],
+        host: match[2],
+        hostname: match[3],
+        port: match[4],
+        pathname: match[5],
+        search: match[6],
+        hash: match[7]
+    }
+}
+
 async function URLIsInWhitelist(url) {
     let hasValue = false;
+
+    const urlInformation = getLocationInformation(url);
 
     Object.keys(embeddingStuff).forEach(value => {
         const entry = embeddingStuff[value];
         if (hasValue) return;
-        hasValue = (url.includes(entry));
+        const embedInformation = getLocationInformation(entry);
+        hasValue = (urlInformation.host === embedInformation.host);
     });
 
     return hasValue;
+}
+
+function IsImagePath(path) {
+    const allowedImageFormats = ['.jpg', '.png', '.gif']
+    let retVal = false;
+    Object.keys(allowedImageFormats).forEach(key => {
+        if (retVal)
+            return;
+        const format = allowedImageFormats[key].trim();
+        const val = path.substring((path.length - format.length), path.length).toLowerCase().trim();
+        if (val === format)
+            retVal = true;
+    });
+    return retVal;
 }
 
 async function formatChatMessage(messageData, timeStamp) {
@@ -356,8 +395,10 @@ async function formatChatMessage(messageData, timeStamp) {
         for (let key of urlMatches) {
             //try upgrading to https
             if (isInsecure) {
-                key = key.replace("http", "https");
+                key = (key.replace("http", "https"));
             }
+
+            const urlInformation = getLocationInformation(key);
 
             const inWhitelist = await URLIsInWhitelist(key);
             if (!inWhitelist) {
@@ -365,21 +406,31 @@ async function formatChatMessage(messageData, timeStamp) {
                 continue;
             }
 
-            const isYouTubeLink = (key.includes("youtube.com")) || (key.includes("youtu.be"));
-            const isImageLink = (key.includes(".png")) || (key.includes(".jpg")) || (key.includes(".gif"));
+            appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #ffd500'>passed wl!</p>";
+            const urlHost = urlInformation.host.toString();
+            //loop maybe?
+            const isYouTubeLink = urlHost === "www.youtube.com" || urlHost === "youtube.com" || urlHost === "youtu.be";//(key.includes("youtube.com")) || (key.includes("youtu.be"));
+
+            let tmp = urlInformation.pathname.replaceAll("..NL..", "");//workaround for old messages
+            const isImageLink = IsImagePath(tmp);
 
             if (isImageLink) {
-                appendImagesString += (isInsecure ? "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700'>upgraded to https!</p>" : "") + "<img src='" + key + "' alt=''> ";
+                appendImagesString += (isInsecure ? "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700'>upgraded to https!</p>" : "") + "<img src='" + sanitize(key) + "' alt=''> ";
                 message = message.replace(key, "");
+                appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #00ff00'>embedded!</p>";
             } else if (isYouTubeLink) {
                 const videoID = GetYoutubeVideoID(key);
-                const embedURL = 'https://www.youtube.com/embed/' + videoID;
-                appendImagesString += "<iframe title='YouTube video player' type=\"text/html\" width='640' height='362' src='" + embedURL + "' allowFullScreen></iframe>";
-                message = message.replace(key, "");
+                if (videoID) {
+                    const embedURL = 'https://www.youtube.com/embed/' + videoID;
+                    appendImagesString += "<iframe allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture\" " +
+                        "sandbox=\"allow-scripts allow-same-origin\" allowfullscreen frameborder=\"0\"" +
+                        "title='YouTube video player' type=\"text/html\" width='640' height='362' src='" + embedURL + "'></iframe>";
+                    message = message.replace(key, "");
+                    appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #00ff00'>embedded!</p>";
+                }
             }
         }
     }
-
 
     if (messageData["attachments"]) {
         const attachments = JSON.parse(messageData["attachments"]);
@@ -401,7 +452,7 @@ async function formatChatMessage(messageData, timeStamp) {
     const username = messageData["username"];
     const messageSecret = messageData["secret"];
 
-    let sanitizedMessage = sanitize(message).replaceAll("..NL..", "<br />");
+    let sanitizedMessage = message.replaceAll("..NL..", "<br />");
 
     //let checksum = await GetSHA512(message);
     return "<div class=\"d-flex justify-content-start mb-4\">" + "<div class=\"msg_cotainer\"><span class=\"msg_username\">" + username + " <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + messageSecret + "\")'>" + timeStamp + " UID: " + sanitize(messageSecret.slice(0, 16)) + "</span></span> <p style='margin-bottom: 1px;'>" + sanitizedMessage + "</p> " + appendImagesString + "</div></div>";
@@ -561,13 +612,15 @@ async function PostChatMessage() {
     localStorage.setItem("savedChatSecret", chatSecEncrypted);
 
     //adds virtual new line character that gets parsed into an actual new line character when embedding
-    let shittyFunkyFucker = userInput.replace(new RegExp('\r?\n', 'g'), '..NL..');
+
+    let funkyWorkAround = userInput.lastIndexOf('\n') || userInput.lastIndexOf('\r\n');
+    let virtualNewLine = (userInput.substring(0, funkyWorkAround)).replaceAll(new RegExp('\r?\n', 'g'), "..NL..");
 
     try {
         const messageData = {
             "username": username,
             "secret": await GetSHA224(chatSecretData),
-            "message": shittyFunkyFucker,
+            "message": virtualNewLine,
             "attachments": JSON.stringify(currentAttachments)
         }
 
