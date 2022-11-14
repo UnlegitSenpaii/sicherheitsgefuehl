@@ -7,3 +7,8 @@ i hope
 
 
 poc atm
+
+
+
+
+*** i will eventually translate this into compiled js or some funny js framework  ***
