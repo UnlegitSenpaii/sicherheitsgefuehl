@@ -95,7 +95,7 @@ function CipherToString(buf) {
 //converts stuff like <script> to &#60;script&#62;
 function sanitize(str) {
     return String(str).replace(/[^\w. ]/gi, function (c) {
-        return '&#' + c.charCodeAt(0) + ';';
+        return '&#' + c.charCodeAt(0) + (isNaN(c.charCodeAt(1)) ? "" : c.charCodeAt(1)) + ';';
     });
 }
 
@@ -104,10 +104,12 @@ function CheckText() {
     const userInput = inputelement.value;
     if (userInput > 2000) inputelement.value = userInput.slice(0, 2000);
 
+    const actualInput = userInput.replaceAll(new RegExp('\r?\n', 'g'), "");
+
     //theoretical limit is 2147483647, so this size is appropriate I think? - lol it crashes after like 10mio chars
     //! now used for image overhead !
 
-    document.getElementById("chatmessage-comment").innerText = (userInput.length > 0) ? userInput.length + " / 2000" : "";
+    document.getElementById("chatmessage-comment").innerText = (actualInput.length > 0) ? actualInput.length + " / 2000" : "";
 }
 
 function handleUserName() {
@@ -297,7 +299,7 @@ function ReloadEmbeddingWhitelist() {
     embeddingWhitelist.innerHTML = "";
 
     Object.keys(embeddingStuff).forEach(key => {
-        embeddingWhitelist.innerHTML += GetWhitelistHTML(embeddingStuff[key], key);
+        embeddingWhitelist.innerHTML += GetWhitelistHTML(sanitize(embeddingStuff[key]), sanitize(key));
     })
 }
 
@@ -373,12 +375,10 @@ function IsImagePath(path) {
     const allowedImageFormats = ['.jpg', '.png', '.gif']
     let retVal = false;
     Object.keys(allowedImageFormats).forEach(key => {
-        if (retVal)
-            return;
+        if (retVal) return;
         const format = allowedImageFormats[key].trim();
         const val = path.substring((path.length - format.length), path.length).toLowerCase().trim();
-        if (val === format)
-            retVal = true;
+        if (val === format) retVal = true;
     });
     return retVal;
 }
@@ -422,9 +422,7 @@ async function formatChatMessage(messageData, timeStamp) {
                 const videoID = GetYoutubeVideoID(key);
                 if (videoID) {
                     const embedURL = 'https://www.youtube.com/embed/' + videoID;
-                    appendImagesString += "<iframe allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture\" " +
-                        "sandbox=\"allow-scripts allow-same-origin\" allowfullscreen frameborder=\"0\"" +
-                        "title='YouTube video player' type=\"text/html\" width='640' height='362' src='" + embedURL + "'></iframe>";
+                    appendImagesString += "<iframe allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture\" " + "sandbox=\"allow-scripts allow-same-origin\" allowfullscreen frameborder=\"0\"" + "title='YouTube video player' type=\"text/html\" width='640' height='362' src='" + embedURL + "'></iframe>";
                     message = message.replace(key, "");
                     appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #00ff00'>embedded!</p>";
                 }
@@ -452,10 +450,33 @@ async function formatChatMessage(messageData, timeStamp) {
     const username = messageData["username"];
     const messageSecret = messageData["secret"];
 
-    let sanitizedMessage = message.replaceAll("..NL..", "<br />");
+    //let sanitizedMessage = message.replaceAll("..NL..", "<br />");
+
+    let messageBuffer = message.split("..NL..");
+    let sanitizedMessage = "";
+
+    for (let i = 0; i < messageBuffer.length; i++) {
+        const containsEmoji = /\p{Extended_Pictographic}/u
+        const curBuf = messageBuffer[i];
+        if (containsEmoji.test(curBuf)) {
+            const mhm = curBuf.match(containsEmoji);
+            for (let j = 0; j < mhm.length; j++) {
+                const target = mhm[j];
+                let at = curBuf.indexOf(target);
+                let parts = [curBuf.substring(0, at), curBuf.substring(at + 2, curBuf.length)];
+                sanitizedMessage += sanitize(parts.at(0)) + target + sanitize(parts.at(1));
+            }
+
+            sanitizedMessage += "<br/>";
+            continue;
+        }
+        sanitizedMessage += sanitize(curBuf);
+        sanitizedMessage += "<br/>";
+    }
+
 
     //let checksum = await GetSHA512(message);
-    return "<div class=\"d-flex justify-content-start mb-4\">" + "<div class=\"msg_cotainer\"><span class=\"msg_username\">" + username + " <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + messageSecret + "\")'>" + timeStamp + " UID: " + sanitize(messageSecret.slice(0, 16)) + "</span></span> <p style='margin-bottom: 1px;'>" + sanitizedMessage + "</p> " + appendImagesString + "</div></div>";
+    return "<div class=\"d-flex justify-content-start mb-4\">" + "<div class=\"msg_cotainer\"><span class=\"msg_username\">" + sanitize(username) + " <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + messageSecret + "\")'>" + timeStamp + " UID: " + sanitize(messageSecret.slice(0, 16)) + "</span></span> <p style='margin-bottom: 1px;'>" + (sanitizedMessage) + "</p> " + appendImagesString + "</div></div>";
 }
 
 /*
@@ -584,7 +605,8 @@ async function PostChatMessage() {
     let username = localStorage.getItem("chat-username");
     //I know, this can be easily tampered with since I have no way of double-checking this on the server-side :(
     //please dont
-    if (userInput.length <= 1 || userInput.length > 2000) {
+    const actualInput = userInput.replaceAll(new RegExp('\r?\n', 'g'), "");
+    if (actualInput.length <= 1 || actualInput.length > 2000) {
         await PostMessageToUser("message is invalid or too long");
         return;
     }
@@ -682,10 +704,11 @@ async function ReloadChannels(active = "") {
         let channelName = sanitize(LZString.decompressFromEncodedURIComponent(currentChannel['alias'])).slice(0, 21);
 
         if (channelName.length >= 21) channelName += "..";
+        //sanitize should be fine, since were encoding it as an uricomponent when saving
         if (active === key) {
-            channel_ul.innerHTML += "<li class='active'>" + "<div class=\"d-flex bd-highlight\" onclick=\"JoinChannel('" + currentChannel['token'] + "')\">" + "<div class=\"img_cont\">" + "<img class=\"rounded-circle channel_img\" src=\"./storage/channel_img.png\">" + "<span class=\"online_icon\"></span>" + "</div>" + "<div class=\"user_info\">" + "<span> " + channelName + " </span>" + "</div>" + "</div>" + "</li>";
+            channel_ul.innerHTML += "<li class='active'>" + "<div class=\"d-flex bd-highlight\" onclick=\"JoinChannel('" + sanitize(currentChannel['token']) + "')\">" + "<div class=\"img_cont\">" + "<img class=\"rounded-circle channel_img\" src=\"./storage/channel_img.png\">" + "<span class=\"online_icon\"></span>" + "</div>" + "<div class=\"user_info\">" + "<span> " + channelName + " </span>" + "</div>" + "</div>" + "</li>";
         } else {
-            channel_ul.innerHTML += "<li>" + "<div class=\"d-flex bd-highlight\" onclick=\"JoinChannel('" + currentChannel['token'] + "')\">" + "<div class=\"img_cont\">" + "<img class=\"rounded-circle channel_img\" src=\"./storage/channel_img.png\">" + "<span class=\"online_icon\"></span>" + "</div>" + "<div class=\"user_info\">" + "<span> " + channelName + " </span>" + "</div>" + "</div>" + "</li>";
+            channel_ul.innerHTML += "<li>" + "<div class=\"d-flex bd-highlight\" onclick=\"JoinChannel('" + sanitize(currentChannel['token']) + "')\">" + "<div class=\"img_cont\">" + "<img class=\"rounded-circle channel_img\" src=\"./storage/channel_img.png\">" + "<span class=\"online_icon\"></span>" + "</div>" + "<div class=\"user_info\">" + "<span> " + channelName + " </span>" + "</div>" + "</div>" + "</li>";
         }
     });
     channel_ul.innerHTML += "</ul>";
@@ -1029,7 +1052,6 @@ async function onPageLoad() {
         });
 
         element.addEventListener("paste", (event) => {
-            console.log(event);
             const items = (event.clipboardData || event.originalEvent.clipboardData).items;
             for (const index in items) {
                 const item = items[index];
