@@ -253,7 +253,7 @@ async function PostMessageToUser(message) {
     if (!logs)//missing, page loading or something
         return;
 
-    logs.innerHTML += "<div class=\"input-group\"> <div class=\"form-control settings_log\"><span>" + message + "</span></div></div>";
+    logs.innerHTML += "<div class=\"input-group\"> <div class=\"form-control settings_log\"><span>" + sanitize(message) + "</span></div></div>";
     console.log(message);
 }
 
