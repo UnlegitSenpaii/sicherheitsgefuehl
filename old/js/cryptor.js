@@ -4,44 +4,40 @@
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
     (bugs)
-    - emojis dont work?
-    - loading screen is glitched
     - sending message on enter doesn't work sometimes?
-    - its possible to send "empty" messages with just enter as input
     - "channel info" button is not very good
-    - ui channel settings are in an incorrect location
     - ui ui ui
 
     (implementation queue)
-    - opensource already!!!
     - !IMPORTANT! improve loading times by loading messages one by one
         -> would make channel switching infinitely faster
         -> no need to refresh entire page to check for messages
         -> cache
-    - Emojis are lost somewhere
     - Right Click Message Menu
         -> React to messages
         -> Reply to messages
         -> Copy message / content?
     - remove inline js & forbid inline js using csp
     - sandbox domain / sandbox iframe
-    - Remove from content upload queue
+    - Remove from content upload queue > remove images from queue
     - Focus on image content
     - Message formatting (code, bold, italic, ...)
-    - Fix YouTube embed, self coded "embedder" maybe?
     - Steam & Reddit embedding
+    - Edit Channels ?? (pictures?)
+    - Switch over to events
+    - start switching over to classes?
     - replace "embedding blocked" with something else, maybe just change color of message or something
     - custom channel picture
     - avatar support
     - user-friendliness (user does not have to "focus" to understand something)
-    - desktop notification on new message (? oldhash !== newhash - when server replies with something else than the keepalive)
-    - rework loading screen
+    - desktop notification on new message (? -> new message event we get from the server)
     - message banner for new message
     - blur or spoiler thing for content
     - dynamic website title
     - make logs more appearing to the user (example: "msg too long!" in top right? )
     - drag and drop images?
     - https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/require-trusted-types-for
+    - self-destructing messages
 
     (still thinking about it)
     - support for different file types or file hosters
@@ -53,6 +49,118 @@
 
  */
 
+/*
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+                            Logging
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ */
+
+const messageLevels = {
+    LEVEL_DEBUG: 0, LEVEL_CONSOLE: 1, LEVEL_NOTIFICATION: 2, LEVEL_WARNING: 3, LEVEL_ERROR: 4, LEVEL_FATALERROR: 5
+};
+
+const styleLevels = {
+    0: "LEVEL_DEBUG",
+    1: "LEVEL_CONSOLE",
+    2: "LEVEL_NOTIFICATION",
+    3: "LEVEL_WARNING",
+    4: "LEVEL_ERROR",
+    5: "LEVEL_FATALERROR"
+};
+
+const printLevels = {
+    0: "DEBUG", 1: "CONSOLE", 2: "NOTIFICATION", 3: "WARNING", 4: "ERROR", 5: "FATALERROR"
+};
+
+const timeoutLevels = {
+    0: 100, 1: 100, 2: 1500, 3: 2000, 4: 2500, 5: 5000
+};
+
+class logging_message {
+    constructor(errormessage, messagelevel = 1) {
+        this.errorMessage = errormessage;
+        this.messageLevel = messagelevel;
+        //emptiness
+    }
+
+    get GetErrorMessage() {
+        return this.errorMessage;
+    }
+
+    get GetMessageLevel() {
+        return this.messageLevel;
+    }
+
+    set SetMessageLevel(messagelvl) {
+        this.messageLevel = messagelvl;
+    }
+
+    set SetErrorMessage(errormsg) {
+        this.errorMessage = errormsg;
+    }
+}
+
+
+class logging_engine {
+    constructor(htmlEntity = "crypt-logs", hookToConsole = false) {
+        this.HTMLElementID = htmlEntity;
+        this.hookToConsole = false;
+        this.notificationQueue = [];
+    }
+
+    get GetNotificationQueue() {
+        return this.notificationQueue;
+    }
+
+    get ShouldHookToConsole() {
+        return this.hookToConsole;
+    }
+
+    get LoggingHTMLElementID() {
+        return this.HTMLElementID;
+    }
+
+    Log(message, messageLevel = messageLevels.LEVEL_CONSOLE) {
+        const msg = new logging_message(message, messageLevel);
+
+        //prioritize this.
+        if (messageLevel === messageLevels.LEVEL_FATALERROR) this.ClearNotifications();
+
+        this.notificationQueue.push(msg);
+    }
+
+    CreateElementForMessage(message, messageLevel) {
+        const bodytag = document.getElementsByClassName('alert-container')[0];
+        if (!bodytag)//page still loading
+            return;
+
+        const div = document.createElement('div');
+        div.setAttribute('id', btoa(message + messageLevel));
+
+        div.innerHTML = "<div class=\"alert " + styleLevels[messageLevel] + "\"> <strong> " + printLevels[messageLevel] + "</strong> " + sanitize(message) + "</div>";
+        bodytag.insertBefore(div, bodytag.firstChild);
+
+        setTimeout(() => {
+            let element = document.getElementById(btoa(message + messageLevel));
+            element.parentNode.removeChild(element);
+        }, timeoutLevels[messageLevel]);
+    }
+
+    DisplayLogs() {
+        const debugLogElement = document.getElementById(this.HTMLElementID);
+        if (!debugLogElement) return;
+
+        this.notificationQueue.forEach((msg) => {
+            console.log("[" + styleLevels[msg.messageLevel] + "] " + msg.errorMessage);
+            this.CreateElementForMessage(msg.errorMessage, msg.messageLevel);
+        })
+        this.ClearNotifications();
+    }
+
+    ClearNotifications() {
+        this.notificationQueue = [];
+    }
+}
 
 /*
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -65,6 +173,7 @@ let channelStuff = {};
 let embeddingStuff = {};
 let currentAttachments = {};
 let fetchingMessages = false;
+const logging = new logging_engine()
 
 /*
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -112,6 +221,25 @@ function CheckText() {
     document.getElementById("chatmessage-comment").innerText = (actualInput.length > 0) ? actualInput.length + " / 2000" : "";
 }
 
+function CheckForAlerts() {
+    const controller = new AbortController();
+    let close = document.getElementsByClassName("warning-closebutton");
+
+    for (let i = 0; i < close.length; i++) {
+        const item = close[i];
+        item.addEventListener("click", closeAlert, {signal: controller.signal});
+
+        function closeAlert() {
+            let div = item.parentElement;
+            div.style.opacity = "0";
+            setTimeout(function () {
+                div.style.display = "none"
+                controller.abort();
+            }, 600)
+        }
+    }
+}
+
 function handleUserName() {
     let username = document.getElementById("chat-username");
     if (username.value.length > 25) username.value.slice(0, 25);
@@ -144,6 +272,25 @@ async function GetChannelNameFromToken(token) {
     const channelAddress = await GetChatRoomAddressFromKey(token);
     let currentChannel = channelStuff[channelAddress];
     return LZString.decompressFromEncodedURIComponent(currentChannel['alias']);
+}
+
+async function postData(url = '', data = '') {
+    const response = await fetch(url, {
+        method: 'POST', mode: 'cors', // no-cors, *cors, same-origin
+        cache: 'no-cache', // *default, no-cache, reload, force-cache, only-if-cached
+        credentials: 'same-origin', // include, *same-origin, omit
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }, redirect: 'follow', // manual, *follow, error
+        referrerPolicy: 'no-referrer', // no-referrer, *no-referrer-when-downgrade, origin, origin-when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-origin, unsafe-url
+        body: data // body data type must match "Content-Type" header
+    });
+
+    if (response.status !== 200) {//enter user in infinite loading time
+        return [false, response.status];
+    }
+
+    return [true, response];
 }
 
 /*
@@ -229,7 +376,7 @@ async function decrypt(text, cryptData) {
         return dec.decode(decrypted);
     } catch (e) {
         await PostMessageToUser("* error decrypting *");
-        console.log(e);
+        logging.Log("There was an error decrypting a message!", messageLevels.LEVEL_ERROR);
         return false;
     }
 }
@@ -297,15 +444,15 @@ function ReloadEmbeddingWhitelist() {
     const embeddingWhitelist = document.getElementById("embedding-whitelist");
 
     embeddingWhitelist.innerHTML = "";
-
+    // unescape(encodeURIComponent( )); apparently this is wanted somewhere
     Object.keys(embeddingStuff).forEach(key => {
-        embeddingWhitelist.innerHTML += GetWhitelistHTML(sanitize(embeddingStuff[key]), sanitize(key));
+        embeddingWhitelist.innerHTML += GetWhitelistHTML(sanitize(embeddingStuff[key]), encodeURI(key));
     })
 }
 
 async function DeleteFromEmbeddingData(embedding) {
     if (!embeddingStuff.hasOwnProperty(embedding.toString())) return;
-    await PostMessageToUser("deleted " + embeddingStuff[embedding.toString()] + " from embed data.");
+    logging.Log("deleted " + embeddingStuff[embedding.toString()] + " from embed data.", messageLevels.LEVEL_NOTIFICATION);
     delete embeddingStuff[embedding.toString()];
     await SaveEmbeddingData();
     ReloadEmbeddingWhitelist();
@@ -406,7 +553,7 @@ async function formatChatMessage(messageData, timeStamp) {
                 continue;
             }
 
-            appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #ffd500'>passed wl!</p>";
+            //appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #ffd500'>passed wl!</p>";
             const urlHost = urlInformation.host.toString();
             //loop maybe?
             const isYouTubeLink = urlHost === "www.youtube.com" || urlHost === "youtube.com" || urlHost === "youtu.be";//(key.includes("youtube.com")) || (key.includes("youtu.be"));
@@ -417,18 +564,19 @@ async function formatChatMessage(messageData, timeStamp) {
             if (isImageLink) {
                 appendImagesString += (isInsecure ? "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700'>upgraded to https!</p>" : "") + "<img src='" + sanitize(key) + "' alt=''> ";
                 message = message.replace(key, "");
-                appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #00ff00'>embedded!</p>";
+                //appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #00ff00'>embedded!</p>";
             } else if (isYouTubeLink) {
                 const videoID = GetYoutubeVideoID(key);
                 if (videoID) {
                     const embedURL = 'https://www.youtube.com/embed/' + videoID;
                     appendImagesString += "<iframe allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture\" " + "sandbox=\"allow-scripts allow-same-origin\" allowfullscreen frameborder=\"0\"" + "title='YouTube video player' type=\"text/html\" width='640' height='362' src='" + embedURL + "'></iframe>";
                     message = message.replace(key, "");
-                    appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #00ff00'>embedded!</p>";
+                    //appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #00ff00'>embedded!</p>";
                 }
             }
         }
     }
+
 
     if (messageData["attachments"]) {
         const attachments = JSON.parse(messageData["attachments"]);
@@ -450,33 +598,25 @@ async function formatChatMessage(messageData, timeStamp) {
     const username = messageData["username"];
     const messageSecret = messageData["secret"];
 
-    //let sanitizedMessage = message.replaceAll("..NL..", "<br />");
-
     let messageBuffer = message.split("..NL..");
     let sanitizedMessage = "";
 
     for (let i = 0; i < messageBuffer.length; i++) {
-        const containsEmoji = /\p{Extended_Pictographic}/u
         const curBuf = messageBuffer[i];
-        if (containsEmoji.test(curBuf)) {
-            const mhm = curBuf.match(containsEmoji);
-            for (let j = 0; j < mhm.length; j++) {
-                const target = mhm[j];
-                let at = curBuf.indexOf(target);
-                let parts = [curBuf.substring(0, at), curBuf.substring(at + 2, curBuf.length)];
-                sanitizedMessage += sanitize(parts.at(0)) + target + sanitize(parts.at(1));
-            }
 
-            sanitizedMessage += "<br/>";
-            continue;
-        }
-        sanitizedMessage += sanitize(curBuf);
-        sanitizedMessage += "<br/>";
+        if (curBuf === null || curBuf === "") continue;
+
+        const chatElement = document.createElement('p');
+        chatElement.style = "margin: 0"
+        chatElement.innerText = curBuf;
+
+        if (i > messageBuffer.length) chatElement.innerText += "\n";
+
+        sanitizedMessage += chatElement.outerHTML;
     }
 
 
-    //let checksum = await GetSHA512(message);
-    return "<div class=\"d-flex justify-content-start mb-4\">" + "<div class=\"msg_cotainer\"><span class=\"msg_username\">" + sanitize(username) + " <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + messageSecret + "\")'>" + timeStamp + " UID: " + sanitize(messageSecret.slice(0, 16)) + "</span></span> <p style='margin-bottom: 1px;'>" + (sanitizedMessage) + "</p> " + appendImagesString + "</div></div>";
+    return "<div class=\"d-flex justify-content-start mb-4\">" + "<div class=\"msg_cotainer\"><span class=\"msg_username\">" + sanitize(username) + " <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + messageSecret + "\")'>" + timeStamp + " UID: " + sanitize(messageSecret.slice(0, 16)) + "</span></span>" + (sanitizedMessage) + "" + appendImagesString + "</div></div>";
 }
 
 /*
@@ -524,7 +664,7 @@ class file_engine {
 
             result = await decrypt(encVal, encryptionStuff);
         } catch (err) {
-            console.log("error occurred while processing image: " + err);
+            logging.Log("error occurred while processing image: " + err, messageLevels.LEVEL_ERROR);
         }
 
         const preview = document.getElementById("preview_placeholder");
@@ -607,7 +747,7 @@ async function PostChatMessage() {
     //please dont
     const actualInput = userInput.replaceAll(new RegExp('\r?\n', 'g'), "");
     if (actualInput.length <= 1 || actualInput.length > 2000) {
-        await PostMessageToUser("message is invalid or too long");
+        logging.Log("message is invalid or too long", messageLevels.LEVEL_WARNING);
         return;
     }
 
@@ -615,8 +755,6 @@ async function PostChatMessage() {
     chatMessageElement.value = "";
     const preview = document.getElementById("preview_placeholder");
     preview.innerHTML = ""; //kill all children
-
-    funnyLoadingScreen();
 
     let chatSecretData = document.getElementById("chat-secret").value;
 
@@ -658,33 +796,31 @@ async function PostChatMessage() {
         await postData('sicherheitsgefuehl.php', 'send=1&chatroom=' + chatRoomAddress + "&data=" + encoded)
             .then(response => !response[0] ? GetErrorPage(response[1]) : response[1].text())
             .then(async data => {
-                if (data !== "completed") await PostMessageToUser("Something didn't go right <br> Server responded with: " + data);
+                if (data !== "completed") {
+                    logging.Log("something isnt quite right. please check console for more info", messageLevels.LEVEL_WARNING);
+                    console.log(data);
+                }
             }).then(CheckForAlerts);
     } catch (e) {
         console.log(e);
-        await PostMessageToUser("Error occurred while trying to send message: <br>" + e);
-
-        funnyLoadingScreen(false);
-
+        logging.Log("Error occurred while trying to send message: " + e, messageLevels.LEVEL_ERROR);
         Object.keys(currentAttachments).forEach(key => {
             delete currentAttachments[key]
         });
     }
-
-    funnyLoadingScreen(false);
 
     Object.keys(currentAttachments).forEach(key => {
         delete currentAttachments[key]
     });
     CheckText();
 
-    await FetchChatMessages("1");
+    //await FetchChatMessages("1");
 }
 
 async function GetEncryptionKey(userin) {
     //check if we have the encryption data stored
     if (!userin) {
-        await PostMessageToUser("user has to provide encryption key");
+        logging.Log("No encryption key..", messageLevels.LEVEL_ERROR);
         return;
     }
     let temp = {};
@@ -706,9 +842,9 @@ async function ReloadChannels(active = "") {
         if (channelName.length >= 21) channelName += "..";
         //sanitize should be fine, since were encoding it as an uricomponent when saving
         if (active === key) {
-            channel_ul.innerHTML += "<li class='active'>" + "<div class=\"d-flex bd-highlight\" onclick=\"JoinChannel('" + sanitize(currentChannel['token']) + "')\">" + "<div class=\"img_cont\">" + "<img class=\"rounded-circle channel_img\" src=\"./storage/channel_img.png\">" + "<span class=\"online_icon\"></span>" + "</div>" + "<div class=\"user_info\">" + "<span> " + channelName + " </span>" + "</div>" + "</div>" + "</li>";
+            channel_ul.innerHTML += "<li class='active'>" + "<div class=\"d-flex bd-highlight\" onclick=\"JoinChannel('" + sanitize(currentChannel['token']) + "')\">" + "<div class=\"img_cont\">" + "<img alt='green' class=\"rounded-circle channel_img\" src=\"./storage/channel_img.png\">" + "<span class=\"online_icon\"></span>" + "</div>" + "<div class=\"user_info\">" + "<span> " + channelName + " </span>" + "</div>" + "</div>" + "</li>";
         } else {
-            channel_ul.innerHTML += "<li>" + "<div class=\"d-flex bd-highlight\" onclick=\"JoinChannel('" + sanitize(currentChannel['token']) + "')\">" + "<div class=\"img_cont\">" + "<img class=\"rounded-circle channel_img\" src=\"./storage/channel_img.png\">" + "<span class=\"online_icon\"></span>" + "</div>" + "<div class=\"user_info\">" + "<span> " + channelName + " </span>" + "</div>" + "</div>" + "</li>";
+            channel_ul.innerHTML += "<li>" + "<div class=\"d-flex bd-highlight\" onclick=\"JoinChannel('" + sanitize(currentChannel['token']) + "')\">" + "<div class=\"img_cont\">" + "<img alt='chatroom' class=\"rounded-circle channel_img\" src=\"./storage/channel_img.png\">" + "<span class=\"online_icon\"></span>" + "</div>" + "<div class=\"user_info\">" + "<span> " + channelName + " </span>" + "</div>" + "</div>" + "</li>";
         }
     });
     channel_ul.innerHTML += "</ul>";
@@ -762,7 +898,7 @@ async function DecryptAccessTokens() {
 
     const userRoomData = localStorage.getItem("savedChannelData");
     if (userRoomData && !(await DecryptChannels())) {
-        await PostMessageToUser("incorrect decryption key.");
+        logging.Log("Provided decrypt key is incorrect.", messageLevels.LEVEL_ERROR);
         askForDecrypt.innerHTML = backup;
         return;
     }
@@ -806,7 +942,7 @@ async function JoinNewChannel() {
     }
 
     if (newChannelToken.value.length <= 12) {
-        await PostMessageToUser("provided channel key is too short.");
+        logging.Log("Provided channel key is too short.", messageLevels.LEVEL_ERROR);
         return;
     }
 
@@ -828,9 +964,28 @@ async function JoinNewChannel() {
     newChannelToken.value = "";
 }
 
+async function SendPostData(url = '', data = '', signal = undefined) {
+    const response = await fetch(url, {
+        method: 'POST', mode: 'cors', // no-cors, *cors, same-origin
+        cache: 'no-cache', // *default, no-cache, reload, force-cache, only-if-cached
+        signal: signal, credentials: 'same-origin', // include, *same-origin, omit
+        headers: {
+            'Content-Type': 'application/x-www-form-urlencoded'
+        }, redirect: 'follow', // manual, *follow, error
+        referrerPolicy: 'no-referrer', // no-referrer, *no-referrer-when-downgrade, origin, origin-when-cross-origin, same-origin, strict-origin, strict-origin-when-cross-origin, unsafe-url
+        body: data // body data type must match "Content-Type" header
+    });
+
+    if (response.status !== 200) {//enter user in infinite loading time
+        return [false, response.status];
+    }
+
+    return [true, response];
+}
+
 async function CopyToClipboard(str) {
     navigator.clipboard.writeText(str).catch(async function (err) {
-        await PostMessageToUser("Failed to copy to clipboard. <br> Check console for more info.");
+        logging.Log("Failed to copy to clipboard. Check console for more info.", messageLevels.LEVEL_ERROR);
         console.error("copy to clipboard failed with: " + err);
     });
 }
@@ -842,7 +997,7 @@ function funnyLoadingScreen(load = true) {
 
     if (!load) {
         try {
-            const items = userchat.getElementsByClassName("loading");
+            const items = userchat.getElementsByClassName("skeleton-row");
             for (let i = 0; i < items.length; i++) {
                 userchat.removeChild(items[i]);
             }
@@ -852,17 +1007,47 @@ function funnyLoadingScreen(load = true) {
         return;
     }
 
+    const skelly = ["<span class=\"prod-name skeleton-loader\"></span><span class=\"prod-id skeleton-loader\"></span><br><span class=\"prod-messagecontent skeleton-loader\"></span>", "<span class=\"prod-name skeleton-loader\"></span><span class=\"prod-id skeleton-loader\"></span><br><span class=\"prod-messagecontent-short skeleton-loader\"></span>", "<span class=\"prod-name skeleton-loader\"></span><span class=\"prod-id skeleton-loader\"></span><br><span class=\"prod-img skeleton-loader\"></span>"];
 
     const loadingDivWrapper = document.createElement('div');
-    loadingDivWrapper.className = "content";
+    loadingDivWrapper.className = "skeleton-row";
 
-    const loadingDiv = document.createElement('div');
-    loadingDiv.className = "loading";
-    loadingDiv.innerHTML = "<p>loading</p><span></span>";
+    for (let i = 0; i < Math.floor(Math.random() * 5 + 1); i++) {
+        loadingDivWrapper.innerHTML += skelly[Math.floor(Math.random() * skelly.length)]
+    }
 
-    loadingDivWrapper.appendChild(loadingDiv);
-    userchat.appendChild(loadingDivWrapper);
+    userchat.innerHTML = loadingDivWrapper.outerHTML;
 }
+
+async function AppendChatMessage(chatData, appendToChat = false) {
+    const userchat = document.getElementById('user-messages');
+    const currentChatMessages = document.getElementById('currentChatMessages');
+    if (!userchat)//missing, page loading or something
+        return;
+    let result = "<span class=\"prod-name skeleton-loader\"></span><span class=\"prod-id skeleton-loader\"></span><br><span class=\"prod-messagecontent-short skeleton-loader\"></span>";
+    //refresh the current chat message counter in top left
+    try {
+        const data = chatData;
+        if (!data) return;
+        const encText = data["content"];
+        const decompressed = LZString.decompressFromEncodedURIComponent(encText);
+        const clearMsg = await decrypt(decompressed, encryptionStuff);
+        if (!clearMsg) return;
+        const createdDate = Date.parse(data['created_at'] + 'Z');
+        const localDate = convertUTCDateToLocalDate(new Date(createdDate));
+        const timeStamp = localDate.toLocaleString();
+        const messageData = JSON.parse(clearMsg);
+        const chatmessage = await formatChatMessage(messageData, timeStamp);
+        if (appendToChat) userchat.innerHTML += (chatmessage);
+        result = chatmessage;
+    } catch (e) {
+        logging.Log("Failed to decrypt a message. Check console for more info.", messageLevels.LEVEL_ERROR);
+        console.log(e);
+    }
+    return result;
+}
+
+let WebRequestCache = [];
 
 async function FetchChatMessages(force = "0") {
     //check if we are displaying messages
@@ -876,15 +1061,20 @@ async function FetchChatMessages(force = "0") {
     //check if browser tab is active
     if (document.hidden) return;
 
-    if (force === "1") fetchingMessages = false;
+    if (force === "1") {
+        fetchingMessages = false;
+        WebRequestCache.forEach((val, index) => {
+            val[0].abort();
+            WebRequestCache.splice(index, 1);
+        });
+    }
 
     if (!encryptionStuff || Object.keys(encryptionStuff).length === 0) {//no channel joined..
         return;
     }
 
-    //if the interval is too fast for the internet connection
+    //if the interval is too fast for the internet connection | LEFTOVER - REMOVE ME!
     if (fetchingMessages && force === "0") {
-        console.log("already fetching message, skipping..")
         return;
     }
 
@@ -899,8 +1089,10 @@ async function FetchChatMessages(force = "0") {
     if (force === "1") {
         funnyLoadingScreen();
     }
-
-    await postData('sicherheitsgefuehl.php', 'read=1&force=' + force + '&chatroom=' + chatRoomAddress)
+    const controller = new AbortController();
+    const signal = controller.signal;
+    const webrequestID = WebRequestCache.push([controller, "sicherheitsgefuehl.php", force, chatRoomAddress]);
+    await SendPostData('sicherheitsgefuehl.php', 'read=1&force=' + force + '&chatroom=' + chatRoomAddress, signal)
         .then(response => {
             failed = !response[0];
             return !response[0] ? GetErrorPage(response[1]) : response[1].text()
@@ -908,14 +1100,16 @@ async function FetchChatMessages(force = "0") {
         .then(async data => {
             try {
                 if (failed) {
-                    userchat.innerHTML = "<div class=\"d-flex justify-content-start mb-4\"> <div class=\"msg_cotainer\"><span class=\"msg_username\">Senpaii <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + 0 + "\")'>" + " UID: ADMIN </span></span> <p style='margin-bottom: 1px;'> Looks like you have been sending quite a bit of requests. I think you will have to chill for a little bit now. </p></div></div>";
+                    userchat.innerHTML = "<div class=\"d-flex justify-content-start mb-4\"> <div class=\"msg_cotainer\"><span class=\"msg_username\">Senpaii <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + 0 + "\")'>" + " UID: ADMIN </span></span> <p style='margin-bottom: 1px;'> Looks like you have been sending quite a bit of requests. I think you will have to chill for a bit now. </p></div></div>";
                     rateLimited = true;
                     return;
                 }
                 nothing = (data === "E");
                 if (!nothing) chatData = JSON.parse(data);
+                WebRequestCache = [];
             } catch (e) {
-                await PostMessageToUser("Failed to fetch user messages." + e);
+                logging.Log("Failed to to fetch user messages. Check console for more info.", messageLevels.LEVEL_ERROR);
+                console.log(e);
                 failed = true;
             }
         }).then(CheckForAlerts);
@@ -948,37 +1142,18 @@ async function FetchChatMessages(force = "0") {
     if (chatData.length === 0) {
         userchat.innerHTML += "<div class=\"d-flex justify-content-start mb-4\"> <div class=\"msg_cotainer\"><span class=\"msg_username\">Senpaii <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + 0 + "\")'>" + " UID: ADMIN </span></span> <p style='margin-bottom: 1px;'> Wow! This looks pretty dang empty! You can send a message with the input below. </p></div></div>";
     }
-
-    for (let i = 0; i < chatData.length; i++) {
-        try {
-            const data = chatData[i];
-            if (!data) continue;
-            const encText = data["content"];
-            const decompressed = LZString.decompressFromEncodedURIComponent(encText);
-            const clearMsg = await decrypt(decompressed, encryptionStuff);
-
-            if (!clearMsg) return;
-
-            const createdDate = Date.parse(data['created_at'] + 'Z');
-            const localDate = convertUTCDateToLocalDate(new Date(createdDate));
-            const timeStamp = localDate.toLocaleString();
-
-            const messageData = JSON.parse(clearMsg);
-
-            const chatmessage = await formatChatMessage(messageData, timeStamp);
-            userchat.innerHTML += chatmessage;
-        } catch (e) {
-            await PostMessageToUser("failed to decrypt a message, ID: " + i);
-            console.log(e);
-        }
+    let loadedResult = "";
+    for (let i = chatData.length; i > 0; i--) {
+        loadedResult += await AppendChatMessage(chatData[i], false);
     }
+    userchat.innerHTML = loadedResult;
 
     fetchingMessages = false;
 
     if (force === "1") {
         funnyLoadingScreen(false);
     }
-
+    scrollToBottom();
 }
 
 /*
@@ -996,6 +1171,12 @@ async function doStuffOnEnter(htmlElementId, stuff) {
     }
 }
 
+function scrollToBottom() {
+    const usermessages = document.getElementById('user-messages');
+    if (!usermessages) return;
+    usermessages.scrollTop = 2147483647;//INT32 MAX
+}
+
 async function onPageLoad() {
     const askForDecrypt = document.getElementById("ask_for_decrypt");
     const newChannelToken = document.getElementById("new_channel_token_div");
@@ -1008,7 +1189,7 @@ async function onPageLoad() {
             newChannelToken.hidden = false;
             channelsettings.hidden = false;
             await ReloadChannels();
-        } else console.log("no correct");
+        } else logging.Log("failed to decrypt channels from session token..", messageLevels.LEVEL_WARNING);
     }
 
     let username = localStorage.getItem("chat-username");
@@ -1041,11 +1222,12 @@ async function onPageLoad() {
 
         });
 
-        element.addEventListener("keyup", async ({key}) => {
-            if (key === "Shift") hasShift = false;
+        element.addEventListener("keyup", async (event) => {
+            if (event.key === "Shift") hasShift = false;
 
-            if (key === "Enter") {
+            if (event.key === "Enter") {
                 if (!hasShift) {
+                    event.preventDefault();
                     await PostChatMessage();
                 }
             }
@@ -1060,7 +1242,7 @@ async function onPageLoad() {
                     let reader = new FileReader();
                     reader.onload = async function (event) {
                         await imageHandling.finishUpImage(reader.result).catch((err) => {
-                            console.log(err);
+                            logging.Log(err, messageLevels.LEVEL_ERROR);
                         });
                     };
                     reader.readAsDataURL(blob);
@@ -1070,7 +1252,70 @@ async function onPageLoad() {
 
     }
 
-    setInterval(await FetchChatMessages, 3000);
+
+    //https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
+
+    let eventSource = new EventSource("client_stream.php");
+    const newMessage = async function (event) {
+        if (!encryptionStuff || Object.keys(encryptionStuff).length === 0) {//no channel joined..
+            return;
+        }
+        if (typeof event.data !== 'undefined') {
+            if (event.data.trim() === "keepalive") return;
+            const decoded = atob(event.data);
+            const data = JSON.parse(decoded);
+            await AppendChatMessage(data, true);
+            scrollToBottom();
+            logging.Log("new message!", messageLevels.LEVEL_NOTIFICATION);
+        }
+    };
+
+    eventSource.addEventListener("message", newMessage);
+
+    eventSource.addEventListener("open", () => {
+        logging.Log("listening to server..", messageLevels.LEVEL_NOTIFICATION);
+    });
+
+    eventSource.addEventListener("error", (msg) => {
+        logging.Log("lost connection to server..", messageLevels.LEVEL_ERROR);
+        PostMessageToUser("Lost connection to server!");
+        console.error(msg);
+    });
+
+    // 0 = connecting, 1 = open, 2 = closed
+    setInterval(() => {
+        const eventSourceStates = ["connecting", "open", "closed"];
+        if (eventSource.readyState !== 1) logging.Log("Current connection state is unusual! Connection for " + eventSource.url + ": " + eventSourceStates[eventSource.readyState]);
+    }, 1666)
+
+    setInterval(() => {
+        logging.DisplayLogs();
+        CheckForAlerts();
+    }, 500);
+}
+
+function onPageError(err) {
+    console.log("was that an error just now?");
+    console.log(err);
+
+    const bodytag = document.getElementsByClassName('alert-container')[0];
+    if (!bodytag)//page still loading
+        return;
+
+    const div = document.createElement('div');
+    div.setAttribute('id', 'js-error-banner');
+
+    div.innerHTML = "<div class=\"alert LEVEL_FATALERROR\"> <strong>Whoops!</strong> A javascript error has occurred. Please check the console for more details.</div>";
+    bodytag.insertBefore(div, bodytag.firstChild);
+
+    setTimeout(function () {
+        let element = document.getElementById('js-error-banner');
+        element.parentNode.removeChild(element);
+    }, 2500)
+}
+
+window.onerror = function (err) {
+    onPageError(err);
 }
 
 window.addEventListener("load", onPageLoad, false);
