@@ -770,24 +770,17 @@ async function PostChatMessage() {
     const chatSecEncrypted = LZString.compress(encryptedData);
 
     localStorage.setItem("savedChatSecret", chatSecEncrypted);
-
-    //adds virtual new line character that gets parsed into an actual new line character when embedding
-
-    let funkyWorkAround = userInput.lastIndexOf('\n') || userInput.lastIndexOf('\r\n');
-    let virtualNewLine = (userInput.substring(0, funkyWorkAround)).replaceAll(new RegExp('\r?\n', 'g'), "..NL..");
-
+    
     try {
         const messageData = {
             "username": username,
             "secret": await GetSHA224(chatSecretData),
-            "message": virtualNewLine,
+            "message": userInput,
             "attachments": JSON.stringify(currentAttachments)
         }
-
         const finalMessage = JSON.stringify(messageData);
         let encVal = await encrypt(finalMessage, encryptionStuff);
         const encoded = LZString.compressToEncodedURIComponent(encVal);
-        console.log(encoded.length);
         if (encoded.length >= 4300000) {
             throw new Error("message too big!");
         }
