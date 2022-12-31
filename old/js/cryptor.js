@@ -3,6 +3,8 @@
                             To-Do
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+    - feature chasing < stability
+
     (bugs)
     - sending message on enter doesn't work sometimes?
     - "channel info" button is not very good
@@ -51,123 +53,9 @@
 
 /*
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-                            Logging
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- */
-
-const messageLevels = {
-    LEVEL_DEBUG: 0, LEVEL_CONSOLE: 1, LEVEL_NOTIFICATION: 2, LEVEL_WARNING: 3, LEVEL_ERROR: 4, LEVEL_FATALERROR: 5
-};
-
-const styleLevels = {
-    0: "LEVEL_DEBUG",
-    1: "LEVEL_CONSOLE",
-    2: "LEVEL_NOTIFICATION",
-    3: "LEVEL_WARNING",
-    4: "LEVEL_ERROR",
-    5: "LEVEL_FATALERROR"
-};
-
-const printLevels = {
-    0: "DEBUG", 1: "CONSOLE", 2: "NOTIFICATION", 3: "WARNING", 4: "ERROR", 5: "FATALERROR"
-};
-
-const timeoutLevels = {
-    0: 100, 1: 100, 2: 1500, 3: 2000, 4: 2500, 5: 5000
-};
-
-class logging_message {
-    constructor(errormessage, messagelevel = 1) {
-        this.errorMessage = errormessage;
-        this.messageLevel = messagelevel;
-        //emptiness
-    }
-
-    get GetErrorMessage() {
-        return this.errorMessage;
-    }
-
-    get GetMessageLevel() {
-        return this.messageLevel;
-    }
-
-    set SetMessageLevel(messagelvl) {
-        this.messageLevel = messagelvl;
-    }
-
-    set SetErrorMessage(errormsg) {
-        this.errorMessage = errormsg;
-    }
-}
-
-
-class logging_engine {
-    constructor(htmlEntity = "crypt-logs", hookToConsole = false) {
-        this.HTMLElementID = htmlEntity;
-        this.hookToConsole = false;
-        this.notificationQueue = [];
-    }
-
-    get GetNotificationQueue() {
-        return this.notificationQueue;
-    }
-
-    get ShouldHookToConsole() {
-        return this.hookToConsole;
-    }
-
-    get LoggingHTMLElementID() {
-        return this.HTMLElementID;
-    }
-
-    Log(message, messageLevel = messageLevels.LEVEL_CONSOLE) {
-        const msg = new logging_message(message, messageLevel);
-
-        //prioritize this.
-        if (messageLevel === messageLevels.LEVEL_FATALERROR) this.ClearNotifications();
-
-        this.notificationQueue.push(msg);
-    }
-
-    CreateElementForMessage(message, messageLevel) {
-        const bodytag = document.getElementsByClassName('alert-container')[0];
-        if (!bodytag)//page still loading
-            return;
-
-        const div = document.createElement('div');
-        div.setAttribute('id', btoa(message + messageLevel));
-
-        div.innerHTML = "<div class=\"alert " + styleLevels[messageLevel] + "\"> <strong> " + printLevels[messageLevel] + "</strong> " + sanitize(message) + "</div>";
-        bodytag.insertBefore(div, bodytag.firstChild);
-
-        setTimeout(() => {
-            let element = document.getElementById(btoa(message + messageLevel));
-            element.parentNode.removeChild(element);
-        }, timeoutLevels[messageLevel]);
-    }
-
-    DisplayLogs() {
-        const debugLogElement = document.getElementById(this.HTMLElementID);
-        if (!debugLogElement) return;
-
-        this.notificationQueue.forEach((msg) => {
-            console.log("[" + styleLevels[msg.messageLevel] + "] " + msg.errorMessage);
-            this.CreateElementForMessage(msg.errorMessage, msg.messageLevel);
-        })
-        this.ClearNotifications();
-    }
-
-    ClearNotifications() {
-        this.notificationQueue = [];
-    }
-}
-
-/*
-    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
                             Globals
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
-
 let encryptionStuff = {};
 let channelStuff = {};
 let embeddingStuff = {};
@@ -305,7 +193,7 @@ function getKeyMaterial(blankoKey) {
 
 function getKey(keyMaterial, salt) {
     return window.crypto.subtle.deriveKey({
-        "name": "PBKDF2", salt: salt, "iterations": 100000, "hash": "SHA-256" //roll out SHA-512 eventually...
+        "name": "PBKDF2", "salt": salt, "iterations": 5125120, "hash": "SHA-512"
     }, keyMaterial, {"name": "AES-GCM", "length": 256}, true, ["encrypt", "decrypt"]);
 }
 
@@ -376,7 +264,7 @@ async function decrypt(text, cryptData) {
         return dec.decode(decrypted);
     } catch (e) {
         await PostMessageToUser("* error decrypting *");
-        logging.Log("There was an error decrypting a message!", messageLevels.LEVEL_ERROR);
+        logging.Log("There was an error decrypting a message!", LOG_TYPE_MSG["message"].LEVEL_ERROR);
         return false;
     }
 }
@@ -452,7 +340,7 @@ function ReloadEmbeddingWhitelist() {
 
 async function DeleteFromEmbeddingData(embedding) {
     if (!embeddingStuff.hasOwnProperty(embedding.toString())) return;
-    logging.Log("deleted " + embeddingStuff[embedding.toString()] + " from embed data.", messageLevels.LEVEL_NOTIFICATION);
+    logging.Log("deleted " + embeddingStuff[embedding.toString()] + " from embed data.", LOG_TYPE_MSG["message"].LEVEL_NOTIFICATION);
     delete embeddingStuff[embedding.toString()];
     await SaveEmbeddingData();
     ReloadEmbeddingWhitelist();
@@ -488,18 +376,21 @@ async function FetchEmbeddedData() {
     return true;
 }
 
+function GetErrorPage(errorcode) {
+    switch (errorcode) {
+        case 401:
+            return "<div class=\"content\">  Authentication failed. Please try logging in again. &nbsp; <a onclick=\"location.reload()\" target=\"_blank\" style='color:mediumpurple'>  <i class=\"fa fa-rotate-right\" aria-hidden=\"true\"> </i> </a></div>";
+        default:
+            return "<div class=\"content\">  Server refused to work on your request. &nbsp; <a onclick=\"location.reload()\" target=\"_blank\" style='color:mediumpurple'>  <i class=\"fa fa-rotate-right\" aria-hidden=\"true\"> </i> </a> </div>";
+    }
+}
+
+
 function getLocationInformation(href) {
     //whatever phpstrom says about this regex is wrong, ignore, or it'll implode
     const match = href.match(/^(?:(https?\:)\/\/)?(([^:\/?#]*)(?:\:([0-9]+))?)([\/]{0,1}[^?#]*)(\?[^#]*|)(#.*|)$/);
     return match && {
-        href: href,
-        protocol: match[1],
-        host: match[2],
-        hostname: match[3],
-        port: match[4],
-        pathname: match[5],
-        search: match[6],
-        hash: match[7]
+        href: href, protocol: match[1], host: match[2], hostname: match[3], port: match[4], pathname: match[5], search: match[6], hash: match[7]
     }
 }
 
@@ -531,92 +422,81 @@ function IsImagePath(path) {
 }
 
 async function formatChatMessage(messageData, timeStamp) {
-    let message = messageData["message"];
-    let appendImagesString = "";
+    try {
+        let message = messageData["message"];
+        let appendImagesString = "";
 
-    const isInsecure = message.match(/\bhttp?:\/\/\S+/gi);
-    const urlMatches = message.match(/\bhttps?:\/\/\S+/gi) || isInsecure;
+        const isInsecure = message.match(/\bhttp?:\/\/\S+/gi);
+        const urlMatches = message.match(/\bhttps?:\/\/\S+/gi) || isInsecure;
 
-    //this has so many security vulnerabilities :/
-    if (urlMatches) {
-        for (let key of urlMatches) {
-            //try upgrading to https
-            if (isInsecure) {
-                key = (key.replace("http", "https"));
-            }
+        //this has so many security vulnerabilities :/
+        if (urlMatches) {
+            for (let key of urlMatches) {
+                //try upgrading to https
+                if (isInsecure) {
+                    key = (key.replace("http", "https"));
+                }
 
-            const urlInformation = getLocationInformation(key);
+                const urlInformation = getLocationInformation(key);
 
-            const inWhitelist = await URLIsInWhitelist(key);
-            if (!inWhitelist) {
-                appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: red'>embedding blocked!</p>";
-                continue;
-            }
+                const inWhitelist = await URLIsInWhitelist(key);
+                if (!inWhitelist) {
+                    appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: red'>embedding blocked!</p>";
+                    continue;
+                }
 
-            //appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #ffd500'>passed wl!</p>";
-            const urlHost = urlInformation.host.toString();
-            //loop maybe?
-            const isYouTubeLink = urlHost === "www.youtube.com" || urlHost === "youtube.com" || urlHost === "youtu.be";//(key.includes("youtube.com")) || (key.includes("youtu.be"));
+                const urlHost = urlInformation.host.toString();
+                const isYouTubeLink = urlHost === "www.youtube.com" || urlHost === "youtube.com" || urlHost === "youtu.be";//(key.includes("youtube.com")) || (key.includes("youtu.be"));
+                const isImageLink = IsImagePath(urlInformation.pathname);
 
-            let tmp = urlInformation.pathname.replaceAll("..NL..", "");//workaround for old messages
-            const isImageLink = IsImagePath(tmp);
-
-            if (isImageLink) {
-                appendImagesString += (isInsecure ? "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700'>upgraded to https!</p>" : "") + "<img src='" + sanitize(key) + "' alt=''> ";
-                message = message.replace(key, "");
-                //appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #00ff00'>embedded!</p>";
-            } else if (isYouTubeLink) {
-                const videoID = GetYoutubeVideoID(key);
-                if (videoID) {
-                    const embedURL = 'https://www.youtube.com/embed/' + videoID;
-                    appendImagesString += "<iframe allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture\" " + "sandbox=\"allow-scripts allow-same-origin\" allowfullscreen frameborder=\"0\"" + "title='YouTube video player' type=\"text/html\" width='640' height='362' src='" + embedURL + "'></iframe>";
+                if (isImageLink) {
+                    appendImagesString += (isInsecure ? "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700'>upgraded to https!</p>" : "") + "<img src='" + sanitize(key) + "' alt=''> ";
                     message = message.replace(key, "");
                     //appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #00ff00'>embedded!</p>";
+                } else if (isYouTubeLink) {
+                    const videoID = GetYoutubeVideoID(key);
+                    if (videoID) {
+                        const embedURL = 'https://www.youtube.com/embed/' + videoID;
+                        appendImagesString += "<iframe allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture\" " + "sandbox=\"allow-scripts allow-same-origin\" allowfullscreen frameborder=\"0\"" + "title='YouTube video player' type=\"text/html\" width='640' height='362' src='" + embedURL + "'></iframe>";
+                        message = message.replace(key, "");
+                        //appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: #00ff00'>embedded!</p>";
+                    }
                 }
             }
         }
-    }
 
+        if (messageData["attachments"]) {
+            const attachments = JSON.parse(messageData["attachments"]);
+            if (attachments) {
+                for (const key of Object.keys(attachments)) {
+                    let obj = attachments[key];
+                    let result = await decrypt(obj, encryptionStuff);
 
-    if (messageData["attachments"]) {
-        const attachments = JSON.parse(messageData["attachments"]);
-        if (attachments) {
-            for (const key of Object.keys(attachments)) {
-                let obj = attachments[key];
-                let result = await decrypt(obj, encryptionStuff);
-
-                if (!result) {
-                    appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: red'>failed to load image!</p>";
-                } else {
-                    appendImagesString += "<img src='" + result + "' alt='failed to load image!'>";
+                    if (!result) {
+                        appendImagesString += "<p style='font-size: 11px; margin-bottom: 1px; font-weight: 700; color: red'>failed to load image!</p>";
+                    } else {
+                        appendImagesString += "<img src='" + result + "' alt='failed to load image!'>";
+                    }
                 }
             }
         }
-    }
 
-
-    const username = messageData["username"];
-    const messageSecret = messageData["secret"];
-
-    let messageBuffer = message.split("..NL..");
-    let sanitizedMessage = "";
-
-    for (let i = 0; i < messageBuffer.length; i++) {
-        const curBuf = messageBuffer[i];
-
-        if (curBuf === null || curBuf === "") continue;
+        const username = messageData["username"];
+        const messageSecret = messageData["secret"];
+        let sanitizedMessage = "";
 
         const chatElement = document.createElement('p');
         chatElement.style = "margin: 0"
-        chatElement.innerText = curBuf;
-
-        if (i > messageBuffer.length) chatElement.innerText += "\n";
+        chatElement.innerText = message;
 
         sanitizedMessage += chatElement.outerHTML;
+
+        return "<div class=\"d-flex justify-content-start mb-4\">" + "<div class=\"msg_cotainer\"><span class=\"msg_username\">" + sanitize(username) + " <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + messageSecret + "\")'>" + timeStamp + " UID: " + sanitize(messageSecret.slice(0, 16)) + "</span></span>" + (sanitizedMessage) + "" + appendImagesString + "</div></div>";
+    } catch (e) {
+        logging.Log("failed to format message, check console for more information", LOG_TYPE_MSG["message"].LEVEL_WARNING);
+        console.log(e);
+        return "<div class=\"d-flex justify-content-start mb-4\">" + "<div class=\"msg_cotainer\"><span class=\"msg_username\"> unknown <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: error message\")'>" + timeStamp + " UID: none</span></span> failed to format message :( </div></div>";
     }
-
-
-    return "<div class=\"d-flex justify-content-start mb-4\">" + "<div class=\"msg_cotainer\"><span class=\"msg_username\">" + sanitize(username) + " <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + messageSecret + "\")'>" + timeStamp + " UID: " + sanitize(messageSecret.slice(0, 16)) + "</span></span>" + (sanitizedMessage) + "" + appendImagesString + "</div></div>";
 }
 
 /*
@@ -664,7 +544,7 @@ class file_engine {
 
             result = await decrypt(encVal, encryptionStuff);
         } catch (err) {
-            logging.Log("error occurred while processing image: " + err, messageLevels.LEVEL_ERROR);
+            logging.Log("error occurred while processing image: " + err, LOG_TYPE_MSG["message"].LEVEL_ERROR);
         }
 
         const preview = document.getElementById("preview_placeholder");
@@ -747,7 +627,7 @@ async function PostChatMessage() {
     //please dont
     const actualInput = userInput.replaceAll(new RegExp('\r?\n', 'g'), "");
     if (actualInput.length <= 1 || actualInput.length > 2000) {
-        logging.Log("message is invalid or too long", messageLevels.LEVEL_WARNING);
+        logging.Log("message is invalid or too long", LOG_TYPE_MSG["message"].LEVEL_WARNING);
         return;
     }
 
@@ -770,13 +650,10 @@ async function PostChatMessage() {
     const chatSecEncrypted = LZString.compress(encryptedData);
 
     localStorage.setItem("savedChatSecret", chatSecEncrypted);
-    
+
     try {
         const messageData = {
-            "username": username,
-            "secret": await GetSHA224(chatSecretData),
-            "message": userInput,
-            "attachments": JSON.stringify(currentAttachments)
+            "username": username, "secret": await GetSHA224(chatSecretData), "message": userInput, "attachments": JSON.stringify(currentAttachments)
         }
         const finalMessage = JSON.stringify(messageData);
         let encVal = await encrypt(finalMessage, encryptionStuff);
@@ -790,13 +667,13 @@ async function PostChatMessage() {
             .then(response => !response[0] ? GetErrorPage(response[1]) : response[1].text())
             .then(async data => {
                 if (data !== "completed") {
-                    logging.Log("something isnt quite right. please check console for more info", messageLevels.LEVEL_WARNING);
+                    logging.Log("something isn't quite right. please check console for more info", LOG_TYPE_MSG["message"].LEVEL_WARNING);
                     console.log(data);
                 }
             }).then(CheckForAlerts);
     } catch (e) {
         console.log(e);
-        logging.Log("Error occurred while trying to send message: " + e, messageLevels.LEVEL_ERROR);
+        logging.Log("Error occurred while trying to send message: " + e, LOG_TYPE_MSG["message"].LEVEL_ERROR);
         Object.keys(currentAttachments).forEach(key => {
             delete currentAttachments[key]
         });
@@ -806,14 +683,12 @@ async function PostChatMessage() {
         delete currentAttachments[key]
     });
     CheckText();
-
-    //await FetchChatMessages("1");
 }
 
 async function GetEncryptionKey(userin) {
     //check if we have the encryption data stored
     if (!userin) {
-        logging.Log("No encryption key..", messageLevels.LEVEL_ERROR);
+        logging.Log("No encryption key..", LOG_TYPE_MSG["message"].LEVEL_ERROR);
         return;
     }
     let temp = {};
@@ -891,7 +766,7 @@ async function DecryptAccessTokens() {
 
     const userRoomData = localStorage.getItem("savedChannelData");
     if (userRoomData && !(await DecryptChannels())) {
-        logging.Log("Provided decrypt key is incorrect.", messageLevels.LEVEL_ERROR);
+        logging.Log("Provided decrypt key is incorrect.", LOG_TYPE_MSG["message"].LEVEL_ERROR);
         askForDecrypt.innerHTML = backup;
         return;
     }
@@ -935,7 +810,7 @@ async function JoinNewChannel() {
     }
 
     if (newChannelToken.value.length <= 12) {
-        logging.Log("Provided channel key is too short.", messageLevels.LEVEL_ERROR);
+        logging.Log("Provided channel key is too short.", LOG_TYPE_MSG["message"].LEVEL_ERROR);
         return;
     }
 
@@ -946,8 +821,7 @@ async function JoinNewChannel() {
     if (channelAlias.length === 0) channelAlias = channelId;
 
     channelStuff[channelId.toString()] = {
-        "token": LZString.compressToEncodedURIComponent(channelToken),
-        "alias": LZString.compressToEncodedURIComponent(channelAlias)
+        "token": LZString.compressToEncodedURIComponent(channelToken), "alias": LZString.compressToEncodedURIComponent(channelAlias)
     };
 
     await ReloadChannels(channelId.toString());
@@ -978,7 +852,7 @@ async function SendPostData(url = '', data = '', signal = undefined) {
 
 async function CopyToClipboard(str) {
     navigator.clipboard.writeText(str).catch(async function (err) {
-        logging.Log("Failed to copy to clipboard. Check console for more info.", messageLevels.LEVEL_ERROR);
+        logging.Log("Failed to copy to clipboard. Check console for more info.", LOG_TYPE_MSG["message"].LEVEL_ERROR);
         console.error("copy to clipboard failed with: " + err);
     });
 }
@@ -1017,25 +891,28 @@ async function AppendChatMessage(chatData, appendToChat = false) {
     const currentChatMessages = document.getElementById('currentChatMessages');
     if (!userchat)//missing, page loading or something
         return;
+    if (!chatData) return;
     let result = "<span class=\"prod-name skeleton-loader\"></span><span class=\"prod-id skeleton-loader\"></span><br><span class=\"prod-messagecontent-short skeleton-loader\"></span>";
     //refresh the current chat message counter in top left
     try {
         const data = chatData;
-        if (!data) return;
+        if (!data) throw "failed, missing data";
         const encText = data["content"];
         const decompressed = LZString.decompressFromEncodedURIComponent(encText);
         const clearMsg = await decrypt(decompressed, encryptionStuff);
-        if (!clearMsg) return;
+        if (!clearMsg || clearMsg.length === 0) throw "failed to decrypt message";
         const createdDate = Date.parse(data['created_at'] + 'Z');
         const localDate = convertUTCDateToLocalDate(new Date(createdDate));
         const timeStamp = localDate.toLocaleString();
         const messageData = JSON.parse(clearMsg);
         const chatmessage = await formatChatMessage(messageData, timeStamp);
-        if (appendToChat) userchat.innerHTML += (chatmessage);
+        if (!chatmessage) throw "failed to apply formatting to message";
+        userchat.innerHTML += (chatmessage);
         result = chatmessage;
     } catch (e) {
-        logging.Log("Failed to decrypt a message. Check console for more info.", messageLevels.LEVEL_ERROR);
+        logging.Log("Failed to decrypt a message. Check console for more info.", LOG_TYPE_MSG["message"].LEVEL_ERROR);
         console.log(e);
+        result = "failed to load this message.";
     }
     return result;
 }
@@ -1101,7 +978,7 @@ async function FetchChatMessages(force = "0") {
                 if (!nothing) chatData = JSON.parse(data);
                 WebRequestCache = [];
             } catch (e) {
-                logging.Log("Failed to to fetch user messages. Check console for more info.", messageLevels.LEVEL_ERROR);
+                logging.Log("Failed to to fetch user messages. Check console for more info.", LOG_TYPE_MSG["message"].LEVEL_ERROR);
                 console.log(e);
                 failed = true;
             }
@@ -1109,7 +986,7 @@ async function FetchChatMessages(force = "0") {
 
 
     if (rateLimited) {
-        setTimeout(window.location.reload, 12000);
+        setTimeout(() => location.reload(), 12000);
         return;
     }
 
@@ -1136,11 +1013,17 @@ async function FetchChatMessages(force = "0") {
         userchat.innerHTML += "<div class=\"d-flex justify-content-start mb-4\"> <div class=\"msg_cotainer\"><span class=\"msg_username\">Senpaii <span class=\"msg_time\" onclick='PostMessageToUser(\"user id: " + 0 + "\")'>" + " UID: ADMIN </span></span> <p style='margin-bottom: 1px;'> Wow! This looks pretty dang empty! You can send a message with the input below. </p></div></div>";
     }
     let loadedResult = "";
-    for (let i = chatData.length; i > 0; i--) {
-        loadedResult += await AppendChatMessage(chatData[i], false);
+    for (let i = chatData.length - 1; i >= 0; i--) {
+        const result = await AppendChatMessage(chatData[i], false);
+        if (result === undefined) {
+            logging.Log("failed to format message", LOG_TYPE_MSG["message"].LEVEL_WARNING);
+            console.log(chatData[i]);
+            continue;
+        }
+
+        loadedResult += result;
     }
     userchat.innerHTML = loadedResult;
-
     fetchingMessages = false;
 
     if (force === "1") {
@@ -1182,7 +1065,7 @@ async function onPageLoad() {
             newChannelToken.hidden = false;
             channelsettings.hidden = false;
             await ReloadChannels();
-        } else logging.Log("failed to decrypt channels from session token..", messageLevels.LEVEL_WARNING);
+        } else logging.Log("failed to decrypt channels from session token..", LOG_TYPE_MSG["message"].LEVEL_WARNING);
     }
 
     let username = localStorage.getItem("chat-username");
@@ -1235,7 +1118,7 @@ async function onPageLoad() {
                     let reader = new FileReader();
                     reader.onload = async function (event) {
                         await imageHandling.finishUpImage(reader.result).catch((err) => {
-                            logging.Log(err, messageLevels.LEVEL_ERROR);
+                            logging.Log(err, LOG_TYPE_MSG["message"].LEVEL_ERROR);
                         });
                     };
                     reader.readAsDataURL(blob);
@@ -1259,18 +1142,18 @@ async function onPageLoad() {
             const data = JSON.parse(decoded);
             await AppendChatMessage(data, true);
             scrollToBottom();
-            logging.Log("new message!", messageLevels.LEVEL_NOTIFICATION);
+            logging.Log("new message!", LOG_TYPE_MSG["message"].LEVEL_NOTIFICATION);
         }
     };
 
     eventSource.addEventListener("message", newMessage);
 
     eventSource.addEventListener("open", () => {
-        logging.Log("listening to server..", messageLevels.LEVEL_NOTIFICATION);
+        logging.Log("listening to server..", LOG_TYPE_MSG["message"].LEVEL_NOTIFICATION);
     });
 
     eventSource.addEventListener("error", (msg) => {
-        logging.Log("lost connection to server..", messageLevels.LEVEL_ERROR);
+        logging.Log("lost connection to server..", LOG_TYPE_MSG["message"].LEVEL_ERROR);
         PostMessageToUser("Lost connection to server!");
         console.error(msg);
     });
@@ -1300,6 +1183,8 @@ function onPageError(err) {
 
     div.innerHTML = "<div class=\"alert LEVEL_FATALERROR\"> <strong>Whoops!</strong> A javascript error has occurred. Please check the console for more details.</div>";
     bodytag.insertBefore(div, bodytag.firstChild);
+
+    console.log(err);
 
     setTimeout(function () {
         let element = document.getElementById('js-error-banner');
