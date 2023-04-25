@@ -36,7 +36,7 @@
     - message banner for new message
     - blur or spoiler thing for content
     - dynamic website title
-    - make logs more appearing to the user (example: "msg too long!" in top right? )
+    - make logs more appealing to the user (example: "msg too long!" in top right? )
     - drag and drop images?
     - https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/require-trusted-types-for
     - self-destructing messages
