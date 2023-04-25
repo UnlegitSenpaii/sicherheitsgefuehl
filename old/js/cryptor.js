@@ -40,6 +40,9 @@
     - drag and drop images?
     - https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Content-Security-Policy/require-trusted-types-for
     - self-destructing messages
+    - different encryption strengths using dropdown
+        - (failed to decrypt, this message was sent with different encryption settings (change to high/low - only this message))
+
 
     (still thinking about it)
     - support for different file types or file hosters
@@ -187,6 +190,9 @@ async function postData(url = '', data = '') {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+//wait for https://csrc.nist.gov/projects/post-quantum-cryptography to conclude
+//Lets hope kyber goes through, looks pretty cool
+
 function getKeyMaterial(blankoKey) {
     return window.crypto.subtle.importKey("raw", encodeMe(blankoKey), {name: "PBKDF2"}, false, ["deriveBits", "deriveKey"]);
 }
@@ -268,6 +274,7 @@ async function decrypt(text, cryptData) {
         return false;
     }
 }
+
 
 /*
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -784,9 +791,11 @@ async function DecryptAccessTokens() {
 }
 
 async function JoinChannel(temp) {
+    funnyLoadingScreen();
     encryptionStuff = await GetEncryptionKey(LZString.decompressFromEncodedURIComponent(temp));
     await ReloadChannels(await GetChatRoomAddressFromKey(encryptionStuff['key']));
     await FetchChatMessages("1");
+    funnyLoadingScreen(false);//this is getting called in FetchChatMessages too, call this just to be sure
 }
 
 async function CopyCurrentToken() {
@@ -912,7 +921,7 @@ async function AppendChatMessage(chatData, appendToChat = false) {
     } catch (e) {
         logging.Log("Failed to decrypt a message. Check console for more info.", LOG_TYPE_MSG["message"].LEVEL_ERROR);
         console.log(e);
-        result = "failed to load this message.";
+        result = "<p style=\"font-size: 11px; color: red; margin-bottom: 0; margin-top: 5px\"> failed to load this message </p><br><span class=\"prod-messagecontent-short skeleton-loader\"></span>";
     }
     return result;
 }
@@ -956,9 +965,6 @@ async function FetchChatMessages(force = "0") {
     let rateLimited = false;
     let nothing = false;
 
-    if (force === "1") {
-        funnyLoadingScreen();
-    }
     const controller = new AbortController();
     const signal = controller.signal;
     const webrequestID = WebRequestCache.push([controller, "sicherheitsgefuehl.php", force, chatRoomAddress]);
@@ -1026,9 +1032,6 @@ async function FetchChatMessages(force = "0") {
     userchat.innerHTML = loadedResult;
     fetchingMessages = false;
 
-    if (force === "1") {
-        funnyLoadingScreen(false);
-    }
     scrollToBottom();
 }
 
