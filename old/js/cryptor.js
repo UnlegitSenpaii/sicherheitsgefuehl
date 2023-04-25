@@ -49,7 +49,7 @@
     - support for automation
     - make the send message button a checkbox in settings (disable by default on PCs and enable on Mobile)
     - changelog
-    - advertise somewher?
+    - advertise somewhere?
     - "custom encryption functions" - user can code / use their own implementation of message encryption (technically already possible)
 
  */
