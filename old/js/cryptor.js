@@ -34,7 +34,7 @@
     - user-friendliness (user does not have to "focus" to understand something)
     - desktop notification on new message (? -> new message event we get from the server)
     - message banner for new message
-    - blur or spoiler thing for content
+    - method of censoring/spoiler warning content with either blur or black overlay
     - dynamic website title
     - make logs more appealing to the user (example: "msg too long!" in top right? )
     - drag and drop images?
