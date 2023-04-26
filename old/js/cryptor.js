@@ -30,7 +30,7 @@
     - start switching over to classes?
     - replace "embedding blocked" with something else, maybe just change color of message or something
     - custom channel picture
-    - avatar support
+    - avatar support (convert the user hash thingy to png maybe, that way no need to store images on our end/load image from 3rd party and risk attacks)
     - user-friendliness (user does not have to "focus" to understand something)
     - desktop notification on new message (? -> new message event we get from the server)
     - message banner for new message
