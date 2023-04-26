@@ -614,6 +614,59 @@ class file_engine {
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
 
+
+class DisplayPictureGen {
+    constructor(generatorHash, htmlTargetId) {
+        this.HTMLElementID = htmlTargetId;
+        this.generatorHash = generatorHash;
+        this.random = new Math.seedrandom(this.generatorHash);
+    }
+
+    get Generate() {
+        const canvas = document.getElementById(this.HTMLElementID);
+        const ctx = canvas.getContext('2d');
+
+        //clear what we had before
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        
+        for (let i = 0; i < 20; i++) {
+            const x1 = Math.floor(this.random() * canvas.width);
+            const y1 = Math.floor(this.random() * canvas.height);
+            const x2 = Math.floor(this.random() * canvas.width);
+            const y2 = Math.floor(this.random() * canvas.height);
+            const radius = Math.floor(this.random() * 50);
+            ctx.beginPath();
+            if (this.random() < 0.5) {
+                ctx.moveTo(x1, y1);
+                ctx.lineTo(x2, y2);
+            } else {
+                ctx.arc(x1, y1, radius, 0, 2 * Math.PI);
+            }
+            ctx.strokeStyle = this.GetRandomColor();
+            ctx.lineWidth = Math.floor(this.random() * 10);
+            ctx.stroke();
+        }
+
+        //const pngDataURL = canvas.toDataURL('image/png');
+    }
+
+    GetRandomColor() {
+        const r = Math.floor(this.random() * 256);
+        const g = Math.floor(this.random() * 256);
+        const b = Math.floor(this.random() * 256);
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+}
+
+
+function SetCanvasIDToRandomImage(htmlid, generationHash) {
+    const random = new Math.seedrandom(generationHash);
+    const canvas = document.getElementById(htmlid);
+
+    const ctx = canvas.getContext('2d');
+
+}
+
 async function ResetEncryptToken() {
     localStorage.clear();
     sessionStorage.clear();
@@ -794,7 +847,16 @@ async function DecryptAccessTokens() {
 async function JoinChannel(temp) {
     funnyLoadingScreen();
     encryptionStuff = await GetEncryptionKey(LZString.decompressFromEncodedURIComponent(temp));
-    await ReloadChannels(await GetChatRoomAddressFromKey(encryptionStuff['key']));
+    const currentChannelID = await GetChatRoomAddressFromKey(encryptionStuff['key']);
+    await ReloadChannels(currentChannelID);
+    const smallerChannelID = await GetSHA224(currentChannelID);
+    try {
+        const picGen = new DisplayPictureGen(smallerChannelID, "currentChannelImage");
+        picGen.Generate;
+    } catch (e) {
+        logging.Log("Failed to generate channel image.", LOG_TYPE_MSG["message"].LEVEL_ERROR);
+        console.log(e);
+    }
     await FetchChatMessages("1");
     funnyLoadingScreen(false);//this is getting called in FetchChatMessages too, call this just to be sure
 }
