@@ -15,11 +15,13 @@
         -> would make channel switching infinitely faster
         -> no need to refresh entire page to check for messages
         -> cache
+        -> fetch messages using a web-worker
     - Right Click Message Menu
         -> React to messages
         -> Reply to messages
         -> Copy message / content?
-    - remove inline js & forbid inline js using csp
+    - offload tasks from the main thread to worker threads
+    - remove inline js & forbid inine js using csp
     - sandbox domain / sandbox iframe
     - Remove from content upload queue > remove images from queue
     - Focus on image content
@@ -60,12 +62,14 @@
                             Globals
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 */
+
+
 let encryptionStuff = {};
 let channelStuff = {};
 let embeddingStuff = {};
 let currentAttachments = {};
 let fetchingMessages = false;
-const logging = new logging_engine()
+
 
 /*
     ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -240,27 +244,31 @@ async function GetChatRoomAddressFromKey(key) {
 
 async function encrypt(text, cryptData) {
     const salt = encodeMe(cryptData["salt"]);
-    const iv = encodeMe(cryptData["iv"]);
-    const userKey = cryptData["key"];
-    const bonkers = await getKeyMaterial(userKey);
+    const iv = shake256(btoa(await GetSHA512(btoa((window.crypto.getRandomValues(new Uint8Array(128)).toLocaleString())))), 256);
+    const bonkers = await getKeyMaterial(cryptData["key"]);
 
     let key = await getKey(bonkers, salt);
     let encoded = encodeMe(text);
     const ciphertext = await window.crypto.subtle.encrypt({
-        name: "AES-GCM", iv: iv
+        name: "AES-GCM", iv: encodeMe(iv)
     }, key, encoded);
 
-    return btoa(CipherToString(ciphertext));
+    return iv + btoa(CipherToString(ciphertext));
 }
 
 async function decrypt(text, cryptData) {
     const salt = encodeMe(cryptData["salt"]);
-    const iv = encodeMe(cryptData["iv"]);
+
+    //get the iv from encrypted string:
+    const ivStringPart = String(text).slice(0, 64);
+    const cyphertextPart = String(text).slice(64);
+
+    const iv = encodeMe(ivStringPart);
     const userKey = cryptData["key"];
     const bonkers = await getKeyMaterial(userKey);
 
     let key = await getKey(bonkers, salt);
-    let ciphertext = StringToCipher(atob(text));
+    let ciphertext = StringToCipher(atob(cyphertextPart));
 
     try {
         let decrypted = await window.crypto.subtle.decrypt({
@@ -312,7 +320,7 @@ async function SaveEmbeddingData() {
     const cryptKey = sessionStorage.getItem("roomKey");
     const stuff = await GetEncryptionKey(cryptKey);
     const stringyData = JSON.stringify(embeddingStuff);
-    const encryptedData = await encrypt(stringyData, stuff)
+    const encryptedData = await encrypt(stringyData, stuff);
     const embeddingData = LZString.compress(encryptedData);
     localStorage.setItem("savedEmbeddingData", embeddingData);
 }
@@ -597,12 +605,28 @@ class file_engine {
             delete currentAttachments[key]
         });
 
+        const options = {
+            maxSizeMB: 2,
+            maxWidthOrHeight: 1920,
+            useWebWorker: true,
+        }
+
         for (let i = 0; i < items.length; i++) {
             const loadingDiv = document.createElement('div');
             loadingDiv.className = "loading";
             loadingDiv.innerHTML = "<p>loading</p><span></span>";
             preview.appendChild(loadingDiv);
+            console.log(items[i]);
 
+            if (items[i].type === "image/jpeg" || items[i].type === "image/png" || items[i].type === "image/x-icon") {
+                const compressedFile = await imageCompression(items[i], options);
+                console.log('compressedFile instanceof Blob', compressedFile instanceof Blob); // true
+                console.log(`compressedFile size ${compressedFile.size / 1024 / 1024} MB`); // smaller than maxSizeMB
+                await this.EncodeImageToBase64(compressedFile);
+                return;
+            } else if (items[i].type === "image/gif") {
+                //find something that works
+            }
             await this.EncodeImageToBase64(items[i]);
         }
     }
@@ -628,7 +652,7 @@ class DisplayPictureGen {
 
         //clear what we had before
         ctx.clearRect(0, 0, canvas.width, canvas.height);
-        
+
         for (let i = 0; i < 20; i++) {
             const x1 = Math.floor(this.random() * canvas.width);
             const y1 = Math.floor(this.random() * canvas.height);
@@ -687,7 +711,7 @@ async function PostChatMessage() {
     //I know, this can be easily tampered with since I have no way of double-checking this on the server-side :(
     //please dont
     const actualInput = userInput.replaceAll(new RegExp('\r?\n', 'g'), "");
-    if (actualInput.length <= 1 || actualInput.length > 2000) {
+    if (actualInput.length <= 1 && currentAttachments.length <= 0 || actualInput.length > 2000) {
         logging.Log("message is invalid or too long", LOG_TYPE_MSG["message"].LEVEL_WARNING);
         return;
     }
@@ -752,11 +776,10 @@ async function GetEncryptionKey(userin) {
         logging.Log("No encryption key..", LOG_TYPE_MSG["message"].LEVEL_ERROR);
         return;
     }
+
     let temp = {};
     temp["key"] = userin;
     temp["salt"] = await GetSHA512(userin);
-    temp["iv"] = await GetSHA512(btoa(userin));
-
     return temp;
 }
 
@@ -844,6 +867,7 @@ async function DecryptAccessTokens() {
     await ReloadChannels();
 }
 
+
 async function JoinChannel(temp) {
     funnyLoadingScreen();
     encryptionStuff = await GetEncryptionKey(LZString.decompressFromEncodedURIComponent(temp));
@@ -861,17 +885,6 @@ async function JoinChannel(temp) {
     funnyLoadingScreen(false);//this is getting called in FetchChatMessages too, call this just to be sure
 }
 
-async function CopyCurrentToken() {
-    await CopyToClipboard(encryptionStuff['key']);
-}
-
-async function RemoveCurrentChannel() {
-    const currentChannelID = await GetChatRoomAddressFromKey(encryptionStuff['key']);
-    if (!channelStuff.hasOwnProperty(currentChannelID.toString())) return;
-    delete channelStuff[currentChannelID.toString()];
-    await ReloadChannels("");
-}
-
 async function JoinNewChannel() {
     const newChannelAlias = document.getElementById("new_channel_alias");
     const newChannelToken = document.getElementById("new_channel_token");
@@ -886,21 +899,48 @@ async function JoinNewChannel() {
         return;
     }
 
+    funnyLoadingScreen();
+
     let channelAlias = newChannelAlias.value;
     const channelToken = newChannelToken.value;
     const channelId = await GetChatRoomAddressFromKey(channelToken);
 
     if (channelAlias.length === 0) channelAlias = channelId;
 
-    channelStuff[channelId.toString()] = {
-        "token": LZString.compressToEncodedURIComponent(channelToken), "alias": LZString.compressToEncodedURIComponent(channelAlias)
-    };
+    const compressedChannelToken = LZString.compressToEncodedURIComponent(channelToken);
 
-    await ReloadChannels(channelId.toString());
-    await JoinChannel(channelStuff[channelId.toString()]['token']);
+    channelStuff[channelId.toString()] = {
+        "token": compressedChannelToken, "alias": LZString.compressToEncodedURIComponent(channelAlias)
+    };
 
     newChannelAlias.value = "";
     newChannelToken.value = "";
+
+    await ReloadChannels(channelId);
+
+    encryptionStuff = await GetEncryptionKey(channelToken);
+    const smallerChannelID = await GetSHA224(channelId);
+    try {
+        const picGen = new DisplayPictureGen(smallerChannelID, "currentChannelImage");
+        picGen.Generate;
+    } catch (e) {
+        logging.Log("Failed to generate channel image.", LOG_TYPE_MSG["message"].LEVEL_ERROR);
+        console.log(e);
+    }
+    await FetchChatMessages("1");
+    funnyLoadingScreen(false);//this is getting called in FetchChatMessages too, call this just to be sure
+
+}
+
+async function CopyCurrentToken() {
+    await CopyToClipboard(encryptionStuff['key']);
+}
+
+async function RemoveCurrentChannel() {
+    const currentChannelID = await GetChatRoomAddressFromKey(encryptionStuff['key']);
+    if (!channelStuff.hasOwnProperty(currentChannelID.toString())) return;
+    delete channelStuff[currentChannelID.toString()];
+    await ReloadChannels("");
 }
 
 async function SendPostData(url = '', data = '', signal = undefined) {
@@ -1193,9 +1233,6 @@ async function onPageLoad() {
         });
 
     }
-
-
-    //https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events
 
     let eventSource = new EventSource("client_stream.php");
     const newMessage = async function (event) {
