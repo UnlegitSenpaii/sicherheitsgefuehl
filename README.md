@@ -8,8 +8,6 @@
 
 #### stupid checks
 [![CodeQL](https://github.com/UnlegitSenpaii/sicherheitsgefuehl/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/UnlegitSenpaii/sicherheitsgefuehl/actions/workflows/codeql-analysis.yml)
-![Security Headers](https://img.shields.io/security-headers?url=https%3A%2F%2Fsenpaii.dev)
-![Mozilla HTTP Observatory Grade](https://img.shields.io/mozilla-observatory/grade/senpaii.dev?publish)
 
 #### server status 
 ![Uptime Robot status](https://img.shields.io/uptimerobot/status/m792315556-485d2c0e9bae5cb7acb51b68)
