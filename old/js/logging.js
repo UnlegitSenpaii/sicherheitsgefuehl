@@ -30,6 +30,7 @@ class logging_message {
     constructor(errormessage, messagelevel = LOG_TYPE_MSG["message"].LEVEL_CONSOLE) {
         this.errorMessage = errormessage;
         this.messageLevel = messagelevel;
+        this.timestamp = new Date().getTime();
         //emptiness
     }
 
@@ -41,6 +42,10 @@ class logging_message {
         return this.messageLevel;
     }
 
+    get GetTimeStamp() {
+        return this.timestamp;
+    }
+    
     set SetMessageLevel(messagelvl) {
         this.messageLevel = messagelvl;
     }
@@ -87,7 +92,7 @@ class logging_engine {
         const div = document.createElement('div');
         div.setAttribute('id', btoa(message + messageLevel));
 
-        div.innerHTML = "<div class=\"alert " + LOG_TYPE_MSG["style"][messageLevel] + "\"> <strong> " + LOG_TYPE_MSG["print"][messageLevel] + "</strong> " + sanitize(message) + "</div>";
+        div.innerHTML = "<div class=\"alert " + LOG_TYPE_MSG["style"][messageLevel] + "\"> <strong> " + LOG_TYPE_MSG["print"][messageLevel] + "</strong> " + cryptor.sanitize(message) + "</div>";
         bodytag.insertBefore(div, bodytag.firstChild);
 
         setTimeout(() => {
@@ -101,7 +106,7 @@ class logging_engine {
         if (!debugLogElement) return;
 
         this.notificationQueue.forEach((msg) => {
-            console.log("[" + LOG_TYPE_MSG["style"][msg.messageLevel] + "] " + msg.errorMessage);
+            console.log("[" + new Date(msg.timestamp).toLocaleTimeString() + "." + new Date(msg.timestamp).getMilliseconds() + "] [" + LOG_TYPE_MSG["style"][msg.messageLevel] + "] " + msg.errorMessage);
             this.CreateElementForMessage(msg.errorMessage, msg.messageLevel);
         })
         this.ClearNotifications();
